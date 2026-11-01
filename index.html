@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ProxyAPI Чат</title>
+<style>
+:root{color-scheme:light;--plate:#cdcdc6;--plate2:#b3b3ab;--ink:#262624;--mut:#5a5a55;--lcd:#1d2a1a;--lcd-t:#b6e59a;--lcd-d:#74a15f;--red:#b8322a;--err:#ffb59a}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:#85857f;font:15px/1.45 "Helvetica Neue",Arial,sans-serif;color:var(--ink);display:flex;justify-content:center;padding:12px}
+.unit{width:100%;max-width:860px;height:100%;display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:10px;background:linear-gradient(180deg,#dcdcd5,var(--plate) 35%,var(--plate2));box-shadow:0 2px 0 #f2f2ee inset,0 10px 28px #0007}
+header{display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid #9a9a92;padding-bottom:8px}
+h1{margin:0;font-size:20px;letter-spacing:.02em}
+header span{color:var(--mut);font-size:13px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.f{display:flex;flex-direction:column;gap:3px;font-size:13px;color:var(--mut)}
+.wide{grid-column:1/-1}
+.keyrow{display:flex;gap:6px}
+input[type=text],input[type=password],textarea{width:100%;font:14px ui-monospace,Menlo,Consolas,monospace;color:var(--lcd-t);background:var(--lcd);border:0;border-radius:4px;padding:8px 10px;box-shadow:0 2px 5px #000a inset}
+input::placeholder,textarea::placeholder{color:var(--lcd-d)}
+.row{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center;font-size:13px}
+.row label{display:flex;gap:6px;align-items:center}
+#st{color:var(--mut)}
+button{font:inherit;font-size:13px;padding:7px 12px;color:var(--ink);cursor:pointer;border:1px solid #8a8a82;border-radius:4px;background:linear-gradient(180deg,#e9e9e3,#bdbdb5);box-shadow:0 1px 0 #fff inset,0 1px 2px #0004}
+button:active{transform:translateY(1px)}
+button:disabled{opacity:.5;cursor:default}
+#send{background:linear-gradient(180deg,#d4493f,var(--red));color:#fff;border-color:#7d211b;font-weight:600;padding:7px 18px}
+:focus-visible{outline:2px solid #1b5fd6;outline-offset:2px}
+summary{cursor:pointer;font-size:13px;color:var(--mut)}
+details textarea{margin-top:6px}
+.lcd{flex:1;min-height:120px;overflow-y:auto;background:var(--lcd);color:var(--lcd-t);border-radius:6px;padding:12px 14px;font:14px/1.5 ui-monospace,Menlo,Consolas,monospace;box-shadow:0 3px 8px #000b inset,0 1px 0 #f4f4f0}
+.msg{white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 12px}
+.msg.user{color:var(--lcd-d)}
+.msg.user::before{content:"> "}
+.msg.sys{color:var(--lcd-d);font-style:italic}
+.msg.err{color:var(--err)}
+.wait::after{content:"\2588";animation:b 1s steps(2) infinite}
+@keyframes b{50%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.wait::after{animation:none}}
+.compose{display:flex;gap:8px;align-items:stretch}
+.compose textarea{resize:none;flex:1}
+.btns{display:flex;flex-direction:column;gap:6px}
+@media (max-width:560px){.grid{grid-template-columns:1fr}body{padding:0}.unit{border-radius:0}}
+</style>
+</head>
+<body>
+<main class="unit">
+  <header><h1>ProxyAPI Чат</h1><span>свой ключ, свой браузер</span></header>
+
+  <div class="grid">
+    <label class="f wide">API-ключ proxyapi.ru
+      <span class="keyrow"><input id="key" type="password" placeholder="Вставь ключ сюда" autocomplete="off" spellcheck="false"><button id="eye" type="button">Показать</button></span>
+    </label>
+    <label class="f">Адрес API
+      <input id="base" type="text" spellcheck="false">
+    </label>
+    <label class="f">Модель
+      <input id="model" type="text" list="models" spellcheck="false"><datalist id="models"></datalist>
+    </label>
+  </div>
+
+  <div class="row">
+    <label><input type="checkbox" id="remember"> Запомнить ключ в этом браузере</label>
+    <label><input type="checkbox" id="stream" checked> Потоковый вывод</label>
+    <button id="load" type="button">Загрузить модели</button>
+    <span id="st"></span>
+  </div>
+
+  <details><summary>Системная инструкция</summary><textarea id="sys" rows="2" placeholder="Например: отвечай кратко и по-русски"></textarea></details>
+
+  <div id="log" class="lcd" aria-live="polite"><div class="msg sys">Вставь ключ, выбери модель и напиши сообщение.</div></div>
+
+  <div class="compose">
+    <textarea id="inp" rows="3" placeholder="Сообщение. Enter отправляет, Shift+Enter переносит строку"></textarea>
+    <div class="btns">
+      <button id="send" type="button">Отправить</button>
+      <button id="stop" type="button" hidden>Остановить</button>
+      <button id="clear" type="button">Очистить чат</button>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const store = {
+  get(k){ try { return localStorage.getItem(k); } catch(e){ return null; } },
+  set(k,v){ try { localStorage.setItem(k,v); } catch(e){} },
+  del(k){ try { localStorage.removeItem(k); } catch(e){} }
+};
+const keyEl=$('#key'), baseEl=$('#base'), modelEl=$('#model'), remEl=$('#remember'),
+      streamEl=$('#stream'), sysEl=$('#sys'), log=$('#log'), inp=$('#inp'),
+      sendBtn=$('#send'), stopBtn=$('#stop'), st=$('#st');
+let history = [], ctrl = null;
+
+keyEl.value = store.get('pa_key') || '';
+remEl.checked = !!keyEl.value;
+baseEl.value = store.get('pa_base') || 'https://api.proxyapi.ru/openai/v1';
+modelEl.value = store.get('pa_model') || 'gpt-4o-mini';
+
+function save(){
+  store.set('pa_base', baseEl.value.trim());
+  store.set('pa_model', modelEl.value.trim());
+  if (remEl.checked && keyEl.value.trim()) store.set('pa_key', keyEl.value.trim());
+  else store.del('pa_key');
+}
+remEl.addEventListener('change', save);
+
+$('#eye').onclick = () => {
+  const show = keyEl.type === 'password';
+  keyEl.type = show ? 'text' : 'password';
+  $('#eye').textContent = show ? 'Скрыть' : 'Показать';
+};
+
+function add(cls, text){
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls;
+  d.textContent = text;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+  return d;
+}
+function api(path){ return baseEl.value.trim().replace(/\/+$/, '') + path; }
+function setBusy(b){ sendBtn.hidden = b; stopBtn.hidden = !b; }
+function explain(e){
+  return e instanceof TypeError
+    ? 'Не удалось подключиться. Проверь интернет и адрес API.'
+    : e.message;
+}
+
+$('#load').onclick = async () => {
+  const key = keyEl.value.trim();
+  if (!key) { st.textContent = 'Сначала вставь ключ.'; return; }
+  st.textContent = 'Загружаю…';
+  try {
+    const r = await fetch(api('/models'), { headers: { Authorization: 'Bearer ' + key } });
+    if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 200));
+    const j = await r.json();
+    const ids = (j.data || []).map(m => m.id).sort();
+    const dl = $('#models');
+    dl.innerHTML = '';
+    ids.forEach(id => { const o = document.createElement('option'); o.value = id; dl.appendChild(o); });
+    st.textContent = 'Моделей: ' + ids.length + '. Выбери в поле «Модель».';
+  } catch(e){ st.textContent = 'Ошибка: ' + explain(e); }
+};
+
+async function send(){
+  const text = inp.value.trim();
+  if (!text || ctrl) return;
+  const key = keyEl.value.trim();
+  if (!key) { add('err', 'Вставь API-ключ proxyapi.ru в поле сверху.'); return; }
+  save();
+  inp.value = '';
+  history.push({ role: 'user', content: text });
+  add('user', text);
+  const out = add('bot', '');
+  out.classList.add('wait');
+  const sys = sysEl.value.trim();
+  const messages = (sys ? [{ role: 'system', content: sys }] : []).concat(history);
+  const useStream = streamEl.checked;
+  ctrl = new AbortController();
+  setBusy(true);
+  let acc = '';
+  try {
+    const r = await fetch(api('/chat/completions'), {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+      body: JSON.stringify({ model: modelEl.value.trim(), messages, stream: useStream })
+    });
+    if (!r.ok) throw new Error(r.status + ' ' + (await r.text()).slice(0, 400));
+    if (useStream) {
+      const rd = r.body.getReader(), dec = new TextDecoder();
+      let buf = '';
+      for (;;) {
+        const { done, value } = await rd.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const l of lines) {
+          const s = l.trim();
+          if (!s.startsWith('data:')) continue;
+          const p = s.slice(5).trim();
+          if (p === '[DONE]') continue;
+          try {
+            const t = JSON.parse(p).choices?.[0]?.delta?.content;
+            if (t) { acc += t; out.textContent = acc; log.scrollTop = log.scrollHeight; }
+          } catch(e){}
+        }
+      }
+    } else {
+      const j = await r.json();
+      acc = j.choices?.[0]?.message?.content || '';
+      out.textContent = acc;
+    }
+    if (!acc) out.textContent = '(пустой ответ)';
+    history.push({ role: 'assistant', content: acc });
+  } catch(e) {
+    if (e.name === 'AbortError') {
+      if (acc) history.push({ role: 'assistant', content: acc });
+      else { history.pop(); out.remove(); }
+    } else {
+      history.pop();
+      out.className = 'msg err';
+      out.textContent = 'Ошибка: ' + explain(e);
+    }
+  } finally {
+    ctrl = null;
+    out.classList.remove('wait');
+    setBusy(false);
+    log.scrollTop = log.scrollHeight;
+    inp.focus();
+  }
+}
+
+sendBtn.onclick = send;
+stopBtn.onclick = () => ctrl && ctrl.abort();
+$('#clear').onclick = () => {
+  if (ctrl) ctrl.abort();
+  history = [];
+  log.innerHTML = '';
+  add('sys', 'Чат очищен.');
+};
+inp.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+[baseEl, modelEl].forEach(el => el.addEventListener('change', save));
+</script>
+</body>
+</html>
